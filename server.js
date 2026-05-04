@@ -11,7 +11,6 @@ app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
 const anthropic = new Anthropic();
-const openai    = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const upload    = multer({ dest: '/tmp/audio/' });
 
 // System prompts cached across requests (prompt caching via cache_control)
@@ -48,6 +47,7 @@ app.get('/health', (_, res) => res.json({ ok: true, version: '2.0' }));
 app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Sin archivo de audio' });
   try {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const transcription = await openai.audio.transcriptions.create({
       file: createReadStream(req.file.path),
       model: 'whisper-1',
