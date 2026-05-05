@@ -178,6 +178,22 @@ Analiza el CV y retorna este JSON exacto (5-6 issues, mezcla de críticos, mejor
   }
 });
 
+app.post('/api/save-session', requireAuth, async (req, res) => {
+  const { role, score, questions_count } = req.body;
+  if (!role || score == null) return res.status(400).json({ error: 'Faltan datos' });
+  const { error } = await sb.from('sessions').insert({
+    user_id: req.user.id,
+    role,
+    score,
+    questions_count: questions_count || 0,
+  });
+  if (error) {
+    console.error('[save-session]', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+  res.json({ ok: true });
+});
+
 app.post('/api/generate-report', requireAuth, async (req, res) => {
   const { role, answers } = req.body;
   if (!answers?.length) return res.status(400).json({ error: 'Sin respuestas' });
