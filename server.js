@@ -4,6 +4,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import multer from 'multer';
 import fs from 'fs';
+import os from 'os';
 import { createReadStream } from 'fs';
 
 const app = express();
@@ -11,7 +12,7 @@ app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
 const anthropic = new Anthropic();
-const upload    = multer({ dest: '/tmp/audio/' });
+const upload    = multer({ dest: os.tmpdir() });
 
 // System prompts cached across requests (prompt caching via cache_control)
 const SYSTEM_INTERVIEW = [
@@ -46,16 +47,20 @@ app.get('/health', (_, res) => res.json({ ok: true, version: '2.0' }));
 
 app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Sin archivo de audio' });
+  console.log('[transcribe] recibido:', req.file.size, 'bytes', req.file.mimetype);
   try {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const transcription = await openai.audio.transcriptions.create({
-      file: createReadStream(req.file.path),
+    const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const stream = createReadStream(req.file.path);
+    stream.path = req.file.path + '.m4a';
+    const transcription = await openaiClient.audio.transcriptions.create({
+      file: stream,
       model: 'whisper-1',
       language: 'es',
     });
+    console.log('[transcribe] resultado:', transcription.text);
     res.json({ transcript: transcription.text });
   } catch (e) {
-    console.error('[transcribe]', e.message);
+    console.error('[transcribe] error:', e.message);
     res.status(500).json({ error: e.message });
   } finally {
     fs.unlink(req.file.path, () => {});
