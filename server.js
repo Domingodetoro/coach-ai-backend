@@ -1,18 +1,55 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI, { toFile } from 'openai';
 import multer from 'multer';
 import fs from 'fs';
 import os from 'os';
 import { createReadStream } from 'fs';
+import { createClient } from '@supabase/supabase-js';
 
 const app = express();
-app.use(cors());
+
+// Security headers
+app.use(helmet());
+
+// Restrict CORS to known origins (mobile RN doesn't send Origin, so this only blocks browsers)
+const ALLOWED_ORIGINS = [
+  'https://coach-ai-backend-production.up.railway.app',
+  'http://localhost:3000',
+  'http://localhost:8081',
+  'http://localhost:19006',
+];
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow requests with no Origin (mobile apps, curl) or known origins
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    cb(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET', 'POST'],
+}));
+
 app.use(express.json({ limit: '2mb' }));
 
 const anthropic = new Anthropic();
 const upload    = multer({ dest: os.tmpdir() });
+
+// Supabase admin client for JWT verification
+const sb = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+// Auth middleware — verifies Supabase JWT from Authorization: Bearer <token>
+async function requireAuth(req, res, next) {
+  const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
+  if (!token) return res.status(401).json({ error: 'No autorizado: falta token' });
+  const { data, error } = await sb.auth.getUser(token);
+  if (error || !data?.user) return res.status(401).json({ error: 'No autorizado: token inválido' });
+  req.user = data.user;
+  next();
+}
 
 // System prompts cached across requests (prompt caching via cache_control)
 const SYSTEM_INTERVIEW = [
@@ -43,11 +80,11 @@ function extractJSON(text) {
   return JSON.parse(match[0]);
 }
 
-app.get('/health', (_, res) => res.json({ ok: true, version: '2.0' }));
+app.get('/health', (_, res) => res.json({ ok: true, version: '2.1' }));
 
-app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
+app.post('/api/transcribe', requireAuth, upload.single('audio'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Sin archivo de audio' });
-  console.log('[transcribe] recibido:', req.file.size, 'bytes', req.file.mimetype);
+  console.log('[transcribe] user:', req.user.id, 'size:', req.file.size, 'bytes');
   try {
     const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const audioFile = await toFile(createReadStream(req.file.path), 'audio.m4a', { type: 'audio/m4a' });
@@ -69,7 +106,7 @@ app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
   }
 });
 
-app.post('/api/analyze-answer', async (req, res) => {
+app.post('/api/analyze-answer', requireAuth, async (req, res) => {
   const { role, question, answer } = req.body;
   if (!answer?.trim()) return res.json({ score: 0, tip: 'Respuesta vacía.', strengths: [], improvements: [] });
 
@@ -101,7 +138,7 @@ Evalúa la respuesta y retorna este JSON exacto:
   }
 });
 
-app.post('/api/analyze-cv', async (req, res) => {
+app.post('/api/analyze-cv', requireAuth, async (req, res) => {
   const { cvText, targetRole } = req.body;
   if (!cvText?.trim()) return res.status(400).json({ error: 'CV vacío' });
 
@@ -141,7 +178,7 @@ Analiza el CV y retorna este JSON exacto (5-6 issues, mezcla de críticos, mejor
   }
 });
 
-app.post('/api/generate-report', async (req, res) => {
+app.post('/api/generate-report', requireAuth, async (req, res) => {
   const { role, answers } = req.body;
   if (!answers?.length) return res.status(400).json({ error: 'Sin respuestas' });
 
@@ -191,5 +228,8 @@ Genera el reporte final en este JSON exacto:
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`\n✅ Coach AI Server corriendo → http://localhost:${PORT}`);
-  console.log(`   API Key: ${process.env.ANTHROPIC_API_KEY ? '✓ configurada' : '✗ falta ANTHROPIC_API_KEY'}\n`);
+  console.log(`   Anthropic API Key: ${process.env.ANTHROPIC_API_KEY ? '✓' : '✗ falta'}`);
+  console.log(`   OpenAI API Key:    ${process.env.OPENAI_API_KEY    ? '✓' : '✗ falta'}`);
+  console.log(`   Supabase URL:      ${process.env.SUPABASE_URL      ? '✓' : '✗ falta'}`);
+  console.log(`   Supabase SRK:      ${process.env.SUPABASE_SERVICE_ROLE_KEY ? '✓' : '✗ falta'}\n`);
 });
