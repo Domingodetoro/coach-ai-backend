@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import multer from 'multer';
 import fs from 'fs';
 import os from 'os';
@@ -50,10 +50,9 @@ app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
   console.log('[transcribe] recibido:', req.file.size, 'bytes', req.file.mimetype);
   try {
     const openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const stream = createReadStream(req.file.path);
-    stream.path = req.file.path + '.m4a';
+    const audioFile = await toFile(createReadStream(req.file.path), 'audio.m4a', { type: 'audio/m4a' });
     const transcription = await openaiClient.audio.transcriptions.create({
-      file: stream,
+      file: audioFile,
       model: 'whisper-1',
       language: 'es',
     });
