@@ -57,7 +57,10 @@ app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
       language: 'es',
     });
     console.log('[transcribe] resultado:', transcription.text);
-    res.json({ transcript: transcription.text });
+    const hallucinations = ['amara', 'subtitulos', 'subtítulos', 'community', 'traducido', 'transcrito por'];
+    const text = transcription.text?.trim() || '';
+    const isHallucination = hallucinations.some(h => text.toLowerCase().includes(h));
+    res.json({ transcript: isHallucination ? '' : text });
   } catch (e) {
     console.error('[transcribe] error:', e.message);
     res.status(500).json({ error: e.message });
